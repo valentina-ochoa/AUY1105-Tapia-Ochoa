@@ -1,9 +1,9 @@
-# Proyecto Terraform
+# Proyecto AUY1105
 
-Infraestructura en AWS usando Terraform.
+## Objetivo
+Implementar infraestructura como código con Terraform y validarla con GitHub Actions.
 
-## Recursos
-- VPC
-- Subnet
-- Security Group (SSH restringido)
+## Infraestructura
+- VPC 10.1.0.0/16
+- Subred 10.1.1.0/24
 - EC2 t2.micro
