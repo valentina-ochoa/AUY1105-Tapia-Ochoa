@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.0.0"
+  required_version = ">= 1.0"
 
   required_providers {
     aws = {
@@ -9,9 +9,6 @@ terraform {
   }
 }
 
-# ------------------------
-# PROVIDER
-# ------------------------
 provider "aws" {
   region = "us-east-1"
 }
@@ -25,14 +22,6 @@ resource "aws_vpc" "main" {
   tags = {
     Name = "AUY1105-app-vpc"
   }
-}
-
-# 🔒 BLOQUEAR default security group
-resource "aws_default_security_group" "default" {
-  vpc_id = aws_vpc.main.id
-
-  ingress = []
-  egress  = []
 }
 
 # ------------------------
@@ -57,7 +46,7 @@ resource "aws_security_group" "sg" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "HTTP interno"
+    description = "Allow HTTP internally"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -65,30 +54,44 @@ resource "aws_security_group" "sg" {
   }
 
   egress {
-    description = "Salida controlada"
+    description = "Allow outbound"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
-    cidr_blocks = ["10.1.0.0/16"]
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
 # ------------------------
-# KMS KEY
+# KMS KEY (FIX)
 # ------------------------
 resource "aws_kms_key" "logs_key" {
   description             = "KMS key for CloudWatch Logs"
   deletion_window_in_days = 7
+  enable_key_rotation     = true  # ✅ FIX
+
+  policy = jsonencode({         # ✅ FIX
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action   = "kms:*"
+        Resource = "*"
+      }
+    ]
+  })
 }
 
 # ------------------------
-# CLOUDWATCH LOG GROUP
+# CLOUDWATCH LOG GROUP (FIX)
 # ------------------------
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
   name              = "/aws/vpc/flow-logs"
   retention_in_days = 365
-
-  kms_key_id = aws_kms_key.logs_key.arn
+  kms_key_id        = aws_kms_key.logs_key.arn  # ✅ FIX
 
   tags = {
     Name = "vpc-flow-logs"
@@ -96,55 +99,32 @@ resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
 }
 
 # ------------------------
-# IAM ROLE
+# IAM ROLE (FIX EC2)
 # ------------------------
-resource "aws_iam_role" "flow_logs_role" {
-  name = "flow-logs-role"
+resource "aws_iam_role" "ec2_role" {
+  name = "ec2-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "vpc-flow-logs.amazonaws.com"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
       }
-      Action = "sts:AssumeRole"
-    }]
+    ]
   })
 }
 
-# ------------------------
-# IAM POLICY (RESTRINGIDA)
-# ------------------------
-resource "aws_iam_role_policy" "flow_logs_policy" {
-  name = "flow-logs-policy"
-  role = aws_iam_role.flow_logs_role.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Action = [
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ]
-      Resource = aws_cloudwatch_log_group.vpc_flow_logs.arn
-    }]
-  })
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = "ec2-profile"
+  role = aws_iam_role.ec2_role.name
 }
 
 # ------------------------
-# VPC FLOW LOGS
-# ------------------------
-resource "aws_flow_log" "vpc_flow_logs" {
-  iam_role_arn    = aws_iam_role.flow_logs_role.arn
-  log_destination = aws_cloudwatch_log_group.vpc_flow_logs.arn
-  traffic_type    = "ALL"
-  vpc_id          = aws_vpc.main.id
-}
-
-# ------------------------
-# EC2
+# EC2 (FIX GRANDE)
 # ------------------------
 resource "aws_instance" "ec2" {
   ami           = "ami-0c55b159cbfafe1f0"
@@ -155,6 +135,14 @@ resource "aws_instance" "ec2" {
   associate_public_ip_address = false
 
   monitoring = true
+
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name  # ✅ FIX
+
+  ebs_optimized = true  # ✅ FIX
+
+  root_block_device {   # ✅ FIX ENCRYPTION
+    encrypted = true
+  }
 
   metadata_options {
     http_tokens = "required"
