@@ -20,7 +20,7 @@ provider "aws" {
 }
 
 #############################################
-# DATA (para KMS sin wildcard)
+# DATA
 #############################################
 data "aws_caller_identity" "current" {}
 
@@ -36,7 +36,7 @@ resource "aws_vpc" "main" {
 }
 
 #############################################
-# BLOQUEAR SG DEFAULT (CKV2_AWS_12)
+# DEFAULT SG BLOQUEADO
 #############################################
 resource "aws_default_security_group" "default" {
   vpc_id = aws_vpc.main.id
@@ -59,7 +59,7 @@ resource "aws_subnet" "subnet_public" {
 }
 
 #############################################
-# SECURITY GROUP (SIN EGRESO ABIERTO)
+# SECURITY GROUP
 #############################################
 resource "aws_security_group" "sg" {
   name        = "secure-sg"
@@ -74,7 +74,6 @@ resource "aws_security_group" "sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # SOLO salida HTTPS (no todo abierto)
   egress {
     description = "Allow HTTPS out"
     from_port   = 443
@@ -85,7 +84,7 @@ resource "aws_security_group" "sg" {
 }
 
 #############################################
-# KMS KEY (SIN WILDCARD + ROTATION)
+# KMS KEY (CORRECTO)
 #############################################
 resource "aws_kms_key" "logs_key" {
   description             = "KMS key for CloudWatch Logs"
@@ -108,7 +107,7 @@ resource "aws_kms_key" "logs_key" {
 }
 
 #############################################
-# CLOUDWATCH LOG GROUP (CON KMS)
+# CLOUDWATCH LOG GROUP
 #############################################
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
   name              = "/aws/vpc/flow-logs"
@@ -121,7 +120,7 @@ resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
 }
 
 #############################################
-# IAM ROLE PARA FLOW LOGS
+# IAM ROLE FLOW LOGS
 #############################################
 resource "aws_iam_role" "flow_logs_role" {
   name = "flow-logs-role"
@@ -140,6 +139,9 @@ resource "aws_iam_role" "flow_logs_role" {
   })
 }
 
+#############################################
+# IAM POLICY (FIX FINAL)
+#############################################
 resource "aws_iam_role_policy" "flow_logs_policy" {
   name = "flow-logs-policy"
   role = aws_iam_role.flow_logs_role.id
@@ -153,14 +155,14 @@ resource "aws_iam_role_policy" "flow_logs_policy" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "*"
+        Resource = format("%s:*", aws_cloudwatch_log_group.vpc_flow_logs.arn)
       }
     ]
   })
 }
 
 #############################################
-# FLOW LOGS (CKV2_AWS_11)
+# FLOW LOGS
 #############################################
 resource "aws_flow_log" "vpc_flow_logs" {
   log_destination      = aws_cloudwatch_log_group.vpc_flow_logs.arn
@@ -172,25 +174,20 @@ resource "aws_flow_log" "vpc_flow_logs" {
 }
 
 #############################################
-# IAM ROLE PARA EC2
+# IAM ROLE EC2
 #############################################
 resource "aws_iam_role" "ec2_role" {
   name = "ec2-role"
 
-  resource "aws_iam_role_policy" "flow_logs_policy" {
-  name = "flow-logs-policy"
-  role = aws_iam_role.flow_logs_role.id
-
-  policy = jsonencode({
+  assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "${aws_cloudwatch_log_group.vpc_flow_logs.arn}:*"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
       }
     ]
   })
@@ -202,7 +199,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 }
 
 #############################################
-# EC2 (100% SEGURA)
+# EC2 SEGURA
 #############################################
 resource "aws_instance" "ec2" {
   ami           = "ami-0c55b159cbfafe1f0"
