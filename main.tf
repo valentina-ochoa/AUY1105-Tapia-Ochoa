@@ -25,21 +25,12 @@ resource "aws_vpc" "main" {
 }
 
 # -----------------------------
-# DEFAULT SECURITY GROUP BLOQUEADO
-# -----------------------------
-resource "aws_default_security_group" "default" {
-  vpc_id = aws_vpc.main.id
-
-  ingress = []
-  egress  = []
-}
-
-# -----------------------------
-# SUBNET (SIN IP PÚBLICA)
+# SUBNET (SIN IP PUBLICA)
 # -----------------------------
 resource "aws_subnet" "subnet_public" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.1.1.0/24"
+  vpc_id     = aws_vpc.main.id
+  cidr_block = "10.1.1.0/24"
+
   map_public_ip_on_launch = false
 
   tags = {
@@ -52,11 +43,11 @@ resource "aws_subnet" "subnet_public" {
 # -----------------------------
 resource "aws_security_group" "sg" {
   name        = "AUY1105-app-sg"
-  description = "SSH restringido"
+  description = "Security group para SSH restringido"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "SSH solo desde mi IP"
+    description = "SSH desde IP específica"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -64,9 +55,9 @@ resource "aws_security_group" "sg" {
   }
 
   egress {
-    description = "Salida HTTP"
-    from_port   = 80
-    to_port     = 80
+    description = "Salida HTTPS"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -77,7 +68,7 @@ resource "aws_security_group" "sg" {
 }
 
 # -----------------------------
-# IAM ROLE PARA EC2
+# IAM ROLE EC2
 # -----------------------------
 resource "aws_iam_role" "ec2_role" {
   name = "ec2-role"
@@ -85,11 +76,11 @@ resource "aws_iam_role" "ec2_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
       Effect = "Allow"
       Principal = {
         Service = "ec2.amazonaws.com"
       }
+      Action = "sts:AssumeRole"
     }]
   })
 }
@@ -108,15 +99,15 @@ resource "aws_instance" "ec2" {
 
   subnet_id              = aws_subnet.subnet_public.id
   vpc_security_group_ids = [aws_security_group.sg.id]
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
-  monitoring = true
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
+
+  monitoring           = true
+  ebs_optimized        = true
 
   metadata_options {
     http_tokens = "required"
   }
-
-  ebs_optimized = true
 
   root_block_device {
     encrypted = true
@@ -128,14 +119,19 @@ resource "aws_instance" "ec2" {
 }
 
 # -----------------------------
-# CLOUDWATCH LOG GROUP
+# CLOUDWATCH LOG GROUP (FIX)
 # -----------------------------
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
-  name = "/aws/vpc/flow-logs"
+  name              = "/aws/vpc/flow-logs"
+  retention_in_days = 365
+
+  tags = {
+    Name = "vpc-flow-logs"
+  }
 }
 
 # -----------------------------
-# IAM ROLE PARA FLOW LOGS
+# IAM ROLE FLOW LOGS
 # -----------------------------
 resource "aws_iam_role" "flow_logs_role" {
   name = "flow-logs-role"
@@ -143,15 +139,16 @@ resource "aws_iam_role" "flow_logs_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
       Effect = "Allow"
       Principal = {
         Service = "vpc-flow-logs.amazonaws.com"
       }
+      Action = "sts:AssumeRole"
     }]
   })
 }
 
+# ✅ FIX IMPORTANTE: sin "*"
 resource "aws_iam_role_policy" "flow_logs_policy" {
   name = "flow-logs-policy"
   role = aws_iam_role.flow_logs_role.id
@@ -161,23 +158,21 @@ resource "aws_iam_role_policy" "flow_logs_policy" {
     Statement = [{
       Effect = "Allow"
       Action = [
-        "logs:CreateLogGroup",
         "logs:CreateLogStream",
         "logs:PutLogEvents"
       ]
-      Resource = "*"
+      Resource = "${aws_cloudwatch_log_group.vpc_flow_logs.arn}:*"
     }]
   })
 }
 
 # -----------------------------
-# VPC FLOW LOG (CLAVE PARA PASAR CHECKOV)
+# VPC FLOW LOGS
 # -----------------------------
 resource "aws_flow_log" "vpc_flow" {
+  iam_role_arn         = aws_iam_role.flow_logs_role.arn
   log_destination      = aws_cloudwatch_log_group.vpc_flow_logs.arn
   log_destination_type = "cloud-watch-logs"
   traffic_type         = "ALL"
-
-  iam_role_arn = aws_iam_role.flow_logs_role.arn
-  vpc_id       = aws_vpc.main.id
+  vpc_id               = aws_vpc.main.id
 }
