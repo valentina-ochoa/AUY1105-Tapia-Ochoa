@@ -177,15 +177,20 @@ resource "aws_flow_log" "vpc_flow_logs" {
 resource "aws_iam_role" "ec2_role" {
   name = "ec2-role"
 
-  assume_role_policy = jsonencode({
+  resource "aws_iam_role_policy" "flow_logs_policy" {
+  name = "flow-logs-policy"
+  role = aws_iam_role.flow_logs_role.id
+
+  policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
         Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-        Action = "sts:AssumeRole"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "${aws_cloudwatch_log_group.vpc_flow_logs.arn}:*"
       }
     ]
   })
