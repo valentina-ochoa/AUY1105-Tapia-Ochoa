@@ -1,3 +1,17 @@
+terraform {
+  required_version = ">= 1.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# ------------------------
+# PROVIDER
+# ------------------------
 provider "aws" {
   region = "us-east-1"
 }
@@ -60,7 +74,7 @@ resource "aws_security_group" "sg" {
 }
 
 # ------------------------
-# KMS (🔥 SOLUCIÓN CLAVE)
+# KMS KEY
 # ------------------------
 resource "aws_kms_key" "logs_key" {
   description             = "KMS key for CloudWatch Logs"
@@ -68,7 +82,7 @@ resource "aws_kms_key" "logs_key" {
 }
 
 # ------------------------
-# CLOUDWATCH LOG GROUP (ARREGLADO)
+# CLOUDWATCH LOG GROUP
 # ------------------------
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
   name              = "/aws/vpc/flow-logs"
