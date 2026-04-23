@@ -1,21 +1,10 @@
-terraform {
-  required_version = ">= 1.0"
-
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
 provider "aws" {
   region = "us-east-1"
 }
 
-# -----------------------------
+# ------------------------
 # VPC
-# -----------------------------
+# ------------------------
 resource "aws_vpc" "main" {
   cidr_block = "10.1.0.0/16"
 
@@ -24,115 +13,77 @@ resource "aws_vpc" "main" {
   }
 }
 
-# -----------------------------
-# SUBNET (SIN IP PUBLICA)
-# -----------------------------
-resource "aws_subnet" "subnet_public" {
-  vpc_id     = aws_vpc.main.id
-  cidr_block = "10.1.1.0/24"
+# 🔒 BLOQUEAR default security group
+resource "aws_default_security_group" "default" {
+  vpc_id = aws_vpc.main.id
 
+  ingress = []
+  egress  = []
+}
+
+# ------------------------
+# SUBNET
+# ------------------------
+resource "aws_subnet" "subnet_public" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.1.1.0/24"
   map_public_ip_on_launch = false
 
   tags = {
-    Name = "AUY1105-app-subnet"
+    Name = "public-subnet"
   }
 }
 
-# -----------------------------
+# ------------------------
 # SECURITY GROUP
-# -----------------------------
+# ------------------------
 resource "aws_security_group" "sg" {
-  name        = "AUY1105-app-sg"
-  description = "Security group para SSH restringido"
+  name        = "secure-sg"
+  description = "Security group seguro"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "SSH desde IP específica"
-    from_port   = 22
-    to_port     = 22
+    description = "HTTP interno"
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["201.188.31.24/32"]
+    cidr_blocks = ["10.1.0.0/16"]
   }
 
   egress {
-    description = "Salida HTTPS"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "AUY1105-app-sg"
+    description = "Salida controlada"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.1.0.0/16"]
   }
 }
 
-# -----------------------------
-# IAM ROLE EC2
-# -----------------------------
-resource "aws_iam_role" "ec2_role" {
-  name = "ec2-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect = "Allow"
-      Principal = {
-        Service = "ec2.amazonaws.com"
-      }
-      Action = "sts:AssumeRole"
-    }]
-  })
+# ------------------------
+# KMS (🔥 SOLUCIÓN CLAVE)
+# ------------------------
+resource "aws_kms_key" "logs_key" {
+  description             = "KMS key for CloudWatch Logs"
+  deletion_window_in_days = 7
 }
 
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "ec2-profile"
-  role = aws_iam_role.ec2_role.name
-}
-
-# -----------------------------
-# EC2
-# -----------------------------
-resource "aws_instance" "ec2" {
-  ami           = "ami-0c02fb55956c7d316"
-  instance_type = "t2.micro"
-
-  subnet_id              = aws_subnet.subnet_public.id
-  vpc_security_group_ids = [aws_security_group.sg.id]
-
-  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
-
-  monitoring           = true
-  ebs_optimized        = true
-
-  metadata_options {
-    http_tokens = "required"
-  }
-
-  root_block_device {
-    encrypted = true
-  }
-
-  tags = {
-    Name = "AUY1105-app-ec2"
-  }
-}
-
-# -----------------------------
-# CLOUDWATCH LOG GROUP (FIX)
-# -----------------------------
+# ------------------------
+# CLOUDWATCH LOG GROUP (ARREGLADO)
+# ------------------------
 resource "aws_cloudwatch_log_group" "vpc_flow_logs" {
   name              = "/aws/vpc/flow-logs"
   retention_in_days = 365
+
+  kms_key_id = aws_kms_key.logs_key.arn
 
   tags = {
     Name = "vpc-flow-logs"
   }
 }
 
-# -----------------------------
-# IAM ROLE FLOW LOGS
-# -----------------------------
+# ------------------------
+# IAM ROLE
+# ------------------------
 resource "aws_iam_role" "flow_logs_role" {
   name = "flow-logs-role"
 
@@ -148,7 +99,9 @@ resource "aws_iam_role" "flow_logs_role" {
   })
 }
 
-# ✅ FIX IMPORTANTE: sin "*"
+# ------------------------
+# IAM POLICY (RESTRINGIDA)
+# ------------------------
 resource "aws_iam_role_policy" "flow_logs_policy" {
   name = "flow-logs-policy"
   role = aws_iam_role.flow_logs_role.id
@@ -161,18 +114,39 @@ resource "aws_iam_role_policy" "flow_logs_policy" {
         "logs:CreateLogStream",
         "logs:PutLogEvents"
       ]
-      Resource = "${aws_cloudwatch_log_group.vpc_flow_logs.arn}:*"
+      Resource = aws_cloudwatch_log_group.vpc_flow_logs.arn
     }]
   })
 }
 
-# -----------------------------
+# ------------------------
 # VPC FLOW LOGS
-# -----------------------------
-resource "aws_flow_log" "vpc_flow" {
-  iam_role_arn         = aws_iam_role.flow_logs_role.arn
-  log_destination      = aws_cloudwatch_log_group.vpc_flow_logs.arn
-  log_destination_type = "cloud-watch-logs"
-  traffic_type         = "ALL"
-  vpc_id               = aws_vpc.main.id
+# ------------------------
+resource "aws_flow_log" "vpc_flow_logs" {
+  iam_role_arn    = aws_iam_role.flow_logs_role.arn
+  log_destination = aws_cloudwatch_log_group.vpc_flow_logs.arn
+  traffic_type    = "ALL"
+  vpc_id          = aws_vpc.main.id
+}
+
+# ------------------------
+# EC2
+# ------------------------
+resource "aws_instance" "ec2" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+
+  subnet_id                   = aws_subnet.subnet_public.id
+  vpc_security_group_ids      = [aws_security_group.sg.id]
+  associate_public_ip_address = false
+
+  monitoring = true
+
+  metadata_options {
+    http_tokens = "required"
+  }
+
+  tags = {
+    Name = "secure-ec2"
+  }
 }
