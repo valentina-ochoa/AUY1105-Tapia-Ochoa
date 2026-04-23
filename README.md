@@ -7,3 +7,5 @@ Implementar infraestructura como código con Terraform y validarla con GitHub Ac
 - VPC 10.1.0.0/16
 - Subred 10.1.1.0/24
 - EC2 t2.micro
+
+## prueba pipeline
