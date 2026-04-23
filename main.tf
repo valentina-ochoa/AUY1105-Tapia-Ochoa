@@ -24,7 +24,7 @@ resource "aws_vpc" "main" {
   }
 }
 
-# 🔐 Default SG cerrado
+# 🔐 Default SG bloqueado
 resource "aws_default_security_group" "default" {
   vpc_id = aws_vpc.main.id
 
@@ -54,7 +54,7 @@ resource "aws_security_group" "sg" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "SSH solo mi IP"
+    description = "SSH solo desde mi IP"
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
@@ -68,10 +68,14 @@ resource "aws_security_group" "sg" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+
+  tags = {
+    Name = "AUY1105-app-sg"
+  }
 }
 
 # -----------------------------
-# IAM ROLE
+# IAM ROLE PARA EC2
 # -----------------------------
 resource "aws_iam_role" "ec2_role" {
   name = "ec2-role"
@@ -100,9 +104,9 @@ resource "aws_instance" "ec2" {
   ami           = "ami-0c02fb55956c7d316"
   instance_type = "t2.micro"
 
-  subnet_id                   = aws_subnet.subnet_public.id
-  vpc_security_group_ids      = [aws_security_group.sg.id]
-  iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name
+  subnet_id              = aws_subnet.subnet_public.id
+  vpc_security_group_ids = [aws_security_group.sg.id]
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
 
   monitoring = true
 
@@ -119,13 +123,4 @@ resource "aws_instance" "ec2" {
   tags = {
     Name = "AUY1105-app-ec2"
   }
-}
-
-# -----------------------------
-# VPC FLOW LOGS
-# -----------------------------
-resource "aws_flow_log" "vpc_flow" {
-  log_destination_type = "cloud-watch-logs"
-  resource_id          = aws_vpc.main.id
-  traffic_type         = "ALL"
 }
