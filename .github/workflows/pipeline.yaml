@@ -4,21 +4,47 @@ on:
   pull_request:
     branches: ["main"]
 
+permissions:
+  contents: read
+
 jobs:
   terraform:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: hashicorp/setup-terraform@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
 
-      - uses: terraform-linters/setup-tflint@v3
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
 
-      - run: tflint
+      - name: Run TFLint
+        run: tflint
 
-      - uses: bridgecrewio/checkov-action@master
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
 
-      - run: terraform init
+      # -----------------------------
+      # OPA (POLÍTICAS)
+      # -----------------------------
+      - name: Install OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64_static
+          chmod +x opa
+          sudo mv opa /usr/local/bin/
 
-      - run: terraform validate
+      - name: Run OPA Policies
+        run: |
+          opa eval -d policies "data.terraform.security"
+
+      # -----------------------------
+      # TERRAFORM VALIDATION
+      # -----------------------------
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
